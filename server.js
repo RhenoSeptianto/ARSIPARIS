@@ -260,6 +260,28 @@ function issueToken(user) {
   );
 }
 
+function createCaptchaChallenge() {
+  const a = Math.floor(Math.random() * 9) + 1;
+  const b = Math.floor(Math.random() * 9) + 1;
+  const answer = a + b;
+  const token = jwt.sign({ type: "captcha", answer }, JWT_SECRET, { expiresIn: "5m" });
+  return { a, b, token };
+}
+
+function verifyCaptcha(captchaToken, captchaAnswer) {
+  if (!captchaToken || captchaAnswer === undefined || captchaAnswer === null || captchaAnswer === "") {
+    return false;
+  }
+  let payload;
+  try {
+    payload = jwt.verify(captchaToken, JWT_SECRET);
+  } catch {
+    return false;
+  }
+  if (!payload || payload.type !== "captcha") return false;
+  return String(payload.answer) === String(captchaAnswer);
+}
+
 function authRequired(req, res, next) {
   const header = req.headers.authorization || "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : null;
@@ -399,9 +421,17 @@ app.get("/health/ipfs", async (_req, res) => {
   }
 });
 
+app.get("/auth/captcha", (_req, res) => {
+  const challenge = createCaptchaChallenge();
+  return res.json(challenge);
+});
+
 app.post("/auth/login", (req, res) => {
-  const { username, password } = req.body || {};
+  const { username, password, captchaToken, captchaAnswer } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: "username & password wajib" });
+  if (!verifyCaptcha(captchaToken, captchaAnswer)) {
+    return res.status(400).json({ error: "Captcha salah atau kadaluarsa" });
+  }
   const user = getUser(username);
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
     return res.status(401).json({ error: "Login gagal" });

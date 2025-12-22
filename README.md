@@ -230,6 +230,19 @@ UI tersedia di `http://localhost:5173`.
 - Terdapat kontrak `ArchiveRegistry` di `contracts/ArchiveRegistry.sol` (berbasis Solidity + OpenZeppelin).
 - Digunakan sebagai contoh/alternatif registry arsip di jaringan EVM, namun jalur utama sistem ini tetap menggunakan chaincode Hyperledger Fabric.
 
+### Smart Contract dalam Sistem Ini
+- **Smart contract utama (Hyperledger Fabric)**
+	- Smart contract di Fabric diwujudkan sebagai *chaincode* Node.js di folder `chaincode/`.
+	- Fungsi seperti `RegisterArchive`, `SubmitArchive`, `ApproveArchive`, `RejectArchive`, dan `GetAuditTrail` berisi aturan bisnis untuk pengelolaan arsip.
+	- Ketika backend memanggil `contract.submitTransaction(...)`, peer Fabric menjalankan fungsi chaincode tersebut dan hasilnya dicatat di ledger (tidak dapat diubah kembali).
+- **Smart contract contoh (EVM / Solidity)**
+	- File `contracts/ArchiveRegistry.sol` adalah smart contract berbasis Solidity yang mencontohkan registry arsip di jaringan EVM.
+	- Saat ini digunakan sebagai referensi/opsi tambahan, sedangkan implementasi utama di aplikasi ini menggunakan chaincode Hyperledger Fabric.
+- **Lapisan aplikasi off-chain**
+	- Backend Express di `server.js` dan frontend React di `frontend/` **bukan** smart contract; keduanya adalah aplikasi off-chain yang:
+		- Menangani login, enkripsi dokumen, upload ke IPFS, dan logika UI.
+		- Mengirim transaksi ke smart contract/chaincode dan membaca data dari ledger untuk ditampilkan ke pengguna.
+
 ### Cara Jalan Singkat (Ringkasan)
 - Siapkan `.env` dari `.env.example` dan isi minimal `JWT_SECRET` serta `MASTER_KEY` (base64, 32 bytes).
 - Bootstrap jaringan Fabric menggunakan script di folder `scripts/` sesuai langkah pada bagian Setup di atas.

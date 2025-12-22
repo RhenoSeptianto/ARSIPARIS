@@ -25,7 +25,8 @@ export function App() {
   const [archives, setArchives] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  const [loginForm, setLoginForm] = useState({ username: "", password: "" });
+  const [loginForm, setLoginForm] = useState({ username: "", password: "", captchaAnswer: "" });
+  const [captcha, setCaptcha] = useState({ a: null, b: null, token: "" });
   const [userForm, setUserForm] = useState({ username: "", password: "", role: "Uploader" });
   const [userList, setUserList] = useState([]);
   const [editUser, setEditUser] = useState(null);
@@ -46,6 +47,17 @@ export function App() {
   const canUpload = role === "Uploader";
   const canApprove = role === "Approver";
   const canAudit = role === "Auditor" || role === "Approver" || role === "Admin";
+
+  const loadCaptcha = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/auth/captcha`);
+      const data = await res.json();
+      setCaptcha({ a: data.a, b: data.b, token: data.token });
+      setLoginForm((prev) => ({ ...prev, captchaAnswer: "" }));
+    } catch {
+      // jika gagal, biarkan tanpa captcha baru
+    }
+  };
 
   const refreshArchives = async () => {
     if (!token) return;
@@ -77,6 +89,10 @@ export function App() {
     }
   }, [token]);
 
+  useEffect(() => {
+    loadCaptcha();
+  }, []);
+
   const onLogin = async (e) => {
     e.preventDefault();
     setMessage("");
@@ -84,13 +100,19 @@ export function App() {
       const data = await apiFetch("/auth/login", null, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(loginForm),
+        body: JSON.stringify({
+          username: loginForm.username,
+          password: loginForm.password,
+          captchaAnswer: loginForm.captchaAnswer,
+          captchaToken: captcha.token,
+        }),
       });
       setToken(data.token);
       setUser({ username: data.username, role: data.role });
       setMessage("Login berhasil");
     } catch (err) {
       setMessage(err.message);
+      loadCaptcha();
     }
   };
 
@@ -329,7 +351,9 @@ export function App() {
                   setEditUser(null);
                   setUploadForm({ classification: "", file: null });
                   setMessage("");
-                  setLoginForm({ username: "", password: "" });
+                  setLoginForm({ username: "", password: "", captchaAnswer: "" });
+                  setCaptcha({ a: null, b: null, token: "" });
+                  loadCaptcha();
                 }}
               >
                 Logout
@@ -348,6 +372,22 @@ export function App() {
                 onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
                 placeholder="Password"
               />
+              {captcha.a !== null && captcha.b !== null && (
+                <div className="captcha-row">
+                  <div className="muted">Captcha: berapa {captcha.a} + {captcha.b}?</div>
+                  <div className="captcha-controls">
+                    <input
+                      type="number"
+                      value={loginForm.captchaAnswer}
+                      onChange={(e) => setLoginForm({ ...loginForm, captchaAnswer: e.target.value })}
+                      placeholder="Jawaban"
+                    />
+                    <button className="btn ghost" type="button" onClick={loadCaptcha}>
+                      Ganti
+                    </button>
+                  </div>
+                </div>
+              )}
               <button className="btn" type="submit">
                 Login
               </button>
