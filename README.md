@@ -112,6 +112,23 @@ UI tersedia di `http://localhost:5173`.
 5. Approver menyetujui/menolak.
 6. Auditor melihat audit trail.
 
+## Penggunaan Singkat (Peran Pengguna)
+- **Admin**
+	- Login ke UI (`http://localhost:5173`).
+	- Buka menu Manajemen Pengguna dan buat user baru dengan role: Uploader, Approver, atau Auditor.
+- **Uploader (Unit Kerja)**
+	- Login dengan akun Uploader.
+	- Buka menu Upload Arsip, pilih file dan isi klasifikasi, lalu simpan.
+	- Setelah ID arsip muncul, klik kirim/submit untuk mengirim ke Approver.
+- **Approver (Arsiparis)**
+	- Login dengan akun Approver.
+	- Lihat daftar arsip Pending, buka detail arsip yang ingin direview.
+	- Tekan Approve untuk menyetujui atau Reject untuk menolak (isi alasan jika menolak).
+- **Auditor**
+	- Login dengan akun Auditor.
+	- Buka menu Audit, masukkan ID arsip yang ingin dicek.
+	- Lihat status akhir arsip dan riwayat keputusannya (audit trail).
+
 ## API Ringkas
 - `POST /auth/login`
 - `POST /admin/users`
@@ -155,6 +172,17 @@ UI tersedia di `http://localhost:5173`.
 - **Frontend (React + Vite)**
 	- UI role-based di folder `frontend/` (file utama `frontend/src/App.jsx`).
 	- Berkomunikasi dengan backend via `VITE_API_BASE` (default `http://localhost:3001`).
+
+#### Topologi Node (Docker Compose)
+- **Fabric**
+	- 1 orderer: `orderer.example.com`.
+	- 1 peer organisasi: `peer0.org1.example.com` (Org1MSP).
+	- 1 CA: `ca.org1.example.com` (untuk registrasi dan enrolment identitas).
+- **Layanan pendukung**
+	- 1 node IPFS: service `ipfs` (API `:5001`, gateway `:8080`).
+	- 1 backend API: service `backend` (`arsiparis-backend`).
+	- 1 frontend: service `frontend` (Vite dev server `:5173`).
+	- 1 container CLI admin: service `cli` (untuk bootstrap dan operasi Fabric via script).
 
 ### Keamanan & Kriptografi
 - **MASTER_KEY**
