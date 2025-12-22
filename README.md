@@ -184,6 +184,17 @@ UI tersedia di `http://localhost:5173`.
 	- 1 frontend: service `frontend` (Vite dev server `:5173`).
 	- 1 container CLI admin: service `cli` (untuk bootstrap dan operasi Fabric via script).
 
+#### Peran Komponen Fabric
+- **CA (`hyperledger/fabric-ca:1.5`)**
+	- Layanan Certificate Authority yang menerbitkan identitas digital (sertifikat X.509) untuk admin, peer, dan client (user aplikasi).
+	- Menangani proses registrasi dan enrolment user: menghasilkan pasangan private key + certificate yang kemudian disimpan di wallet.
+- **Orderer (`hyperledger/fabric-orderer:2.5`)**
+	- Mengumpulkan transaksi dari client/peer, mengurutkannya, dan membentuk blok.
+	- Mendistribusikan blok ke peer di channel `mychannel` sehingga semua peer memiliki urutan transaksi yang konsisten.
+- **Peer (`hyperledger/fabric-peer:2.5`)**
+	- Menjalankan chaincode (smart contract) `archive` untuk mensimulasikan dan meng-endorse transaksi.
+	- Menyimpan ledger (riwayat blok dan world state) dan mengupdate state ketika menerima blok baru dari orderer.
+
 ### Keamanan & Kriptografi
 - **MASTER_KEY**
 	- Diambil dari environment variable `MASTER_KEY` (base64, 32 bytes) dan divalidasi saat startup.
