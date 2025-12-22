@@ -1,0 +1,26 @@
+# Node / frontend
+node_modules/
+frontend/node_modules/
+
+# Build artifacts & cache
+artifacts/
+cache/
+frontend/dist/
+
+# Runtime data
+data/
+wallet/
+organizations/
+fabric/channel-artifacts/
+fabric/crypto-config/
+config/channel-artifacts/
+config/organizations/
+
+# Env files
+.env
+.env.*
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

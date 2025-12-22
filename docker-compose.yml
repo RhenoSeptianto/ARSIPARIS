@@ -1,0 +1,162 @@
+services:
+  ca.org1.example.com:
+    image: hyperledger/fabric-ca:1.5
+    container_name: ca.org1.example.com
+    environment:
+      - FABRIC_CA_HOME=/etc/hyperledger/fabric-ca-server
+      - FABRIC_CA_SERVER_CA_NAME=ca-org1
+      - FABRIC_CA_SERVER_PORT=7054
+      - FABRIC_CA_SERVER_TLS_ENABLED=false
+    ports:
+      - "7054:7054"
+    command: sh -c 'fabric-ca-server start -b admin:adminpw -d'
+    volumes:
+      - ./fabric/ca:/etc/hyperledger/fabric-ca-server
+
+  orderer.example.com:
+    image: hyperledger/fabric-orderer:2.5
+    container_name: orderer.example.com
+    environment:
+      - FABRIC_LOGGING_SPEC=INFO
+      - ORDERER_GENERAL_LISTENADDRESS=0.0.0.0
+      - ORDERER_GENERAL_LISTENPORT=7050
+      - ORDERER_GENERAL_LOCALMSPID=OrdererMSP
+      - ORDERER_GENERAL_LOCALMSPDIR=/etc/hyperledger/fabric/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp
+      - ORDERER_GENERAL_TLS_ENABLED=true
+      - ORDERER_GENERAL_TLS_PRIVATEKEY=/etc/hyperledger/fabric/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.key
+      - ORDERER_GENERAL_TLS_CERTIFICATE=/etc/hyperledger/fabric/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.crt
+      - ORDERER_GENERAL_TLS_ROOTCAS=[/etc/hyperledger/fabric/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/tls/ca.crt]
+      - ORDERER_GENERAL_BOOTSTRAPMETHOD=file
+      - ORDERER_GENERAL_BOOTSTRAPFILE=/etc/hyperledger/fabric/channel-artifacts/genesis.block
+    working_dir: /etc/hyperledger/fabric
+    volumes:
+      - ./organizations:/etc/hyperledger/fabric/organizations
+      - ./fabric/channel-artifacts:/etc/hyperledger/fabric/channel-artifacts
+      - ./config:/etc/hyperledger/fabric/config
+    ports:
+      - "7050:7050"
+    depends_on:
+      - ca.org1.example.com
+    networks:
+      default:
+        aliases:
+          - orderer.example.com
+
+  peer0.org1.example.com:
+    image: hyperledger/fabric-peer:2.5
+    container_name: peer0.org1.example.com
+    environment:
+      - FABRIC_LOGGING_SPEC=INFO
+      - CORE_PEER_ID=peer0.org1.example.com
+      - CORE_PEER_ADDRESS=peer0.org1.example.com:7051
+      - CORE_PEER_LISTENADDRESS=0.0.0.0:7051
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.org1.example.com:7051
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.org1.example.com:7051
+      - CORE_PEER_LOCALMSPID=Org1MSP
+      - CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
+      - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
+      - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=arsiparis_default
+    working_dir: /etc/hyperledger/fabric
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - ./organizations:/etc/hyperledger/fabric/organizations
+      - ./config:/etc/hyperledger/fabric/config
+    ports:
+      - "7051:7051"
+    depends_on:
+      - orderer.example.com
+    networks:
+      default:
+        aliases:
+          - peer0.org1.example.com
+
+  cli:
+    build:
+      context: .
+      dockerfile: Dockerfile.cli
+    container_name: fabric-cli
+    environment:
+      - FABRIC_CFG_PATH=/etc/hyperledger/fabric/config
+      - FABRIC_LOGGING_SPEC=INFO
+      - CORE_PEER_LOCALMSPID=Org1MSP
+      - CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
+      - CORE_PEER_ADDRESS=peer0.org1.example.com:7051
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
+      - CORE_PEER_BCCSP_DEFAULT=SW
+      - CORE_PEER_BCCSP_SW_HASH=SHA2
+      - CORE_PEER_BCCSP_SW_SECURITY=256
+      - CORE_PEER_BCCSP_SW_FILEKEYSTORE_KEYSTORE=/etc/hyperledger/fabric/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/keystore
+      - CORE_PEER_BCCSP_DEFAULT=SW
+      - CORE_PEER_BCCSP_SW_HASH=SHA2
+      - CORE_PEER_BCCSP_SW_SECURITY=256
+    working_dir: /etc/hyperledger/fabric
+    volumes:
+      - ./config:/etc/hyperledger/fabric/config
+      - ./fabric/channel-artifacts:/etc/hyperledger/fabric/channel-artifacts
+      - ./organizations:/etc/hyperledger/fabric/organizations
+      - ./scripts:/etc/hyperledger/fabric/scripts
+      - ./chaincode:/etc/hyperledger/fabric/chaincode
+    depends_on:
+      - peer0.org1.example.com
+    networks:
+      default:
+        aliases:
+          - cli
+
+  ipfs:
+    image: ipfs/go-ipfs:v0.22.0
+    container_name: ipfs
+    ports:
+      - "5001:5001"
+      - "8080:8080"
+    volumes:
+      - ./data/ipfs:/data/ipfs
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.relayer
+    container_name: arsiparis-backend
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - /app/node_modules
+      - ./data:/app/data
+      - ./wallet:/app/wallet
+    ports:
+      - "3001:3001"
+    command: sh -c "if [ ! -d node_modules ]; then npm install; fi; npm run start"
+    env_file:
+      - .env
+    environment:
+      - IPFS_API_URL=http://ipfs:5001
+      - FABRIC_CONNECTION_PROFILE=./fabric/connection.json
+      - FABRIC_CA_URL=http://ca.org1.example.com:7054
+      - FABRIC_CA_NAME=ca-org1
+      - FABRIC_MSP_ID=Org1MSP
+      - FABRIC_CHANNEL=mychannel
+      - FABRIC_CHAINCODE=archive
+      - FABRIC_CA_ADMIN=admin
+      - FABRIC_CA_ADMIN_PASS=adminpw
+    depends_on:
+      - ipfs
+      - peer0.org1.example.com
+
+  frontend:
+    build: ./frontend
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    command: npm run dev -- --host 0.0.0.0 --port 5173
+    environment:
+      - VITE_API_BASE=http://localhost:3001
+    depends_on:
+      - backend

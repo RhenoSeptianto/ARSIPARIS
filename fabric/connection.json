@@ -1,0 +1,44 @@
+{
+  "name": "arsiparis-network",
+  "version": "1.0.0",
+  "client": {
+    "organization": "Org1"
+  },
+  "organizations": {
+    "Org1": {
+      "mspid": "Org1MSP",
+      "peers": ["peer0.org1.example.com"],
+      "certificateAuthorities": ["ca.org1.example.com"]
+    }
+  },
+  "peers": {
+    "peer0.org1.example.com": {
+      "url": "grpcs://peer0.org1.example.com:7051",
+      "tlsCACerts": {
+        "path": "/app/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt"
+      },
+      "grpcOptions": {
+        "ssl-target-name-override": "peer0.org1.example.com",
+        "hostnameOverride": "peer0.org1.example.com"
+      }
+    }
+  },
+  "orderers": {
+    "orderer.example.com": {
+      "url": "grpcs://orderer.example.com:7050",
+      "tlsCACerts": {
+        "path": "/app/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/tls/ca.crt"
+      },
+      "grpcOptions": {
+        "ssl-target-name-override": "orderer.example.com",
+        "hostnameOverride": "orderer.example.com"
+      }
+    }
+  },
+  "certificateAuthorities": {
+    "ca.org1.example.com": {
+      "url": "http://ca.org1.example.com:7054",
+      "caName": "ca-org1"
+    }
+  }
+}
