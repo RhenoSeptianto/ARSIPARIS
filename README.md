@@ -50,7 +50,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ### Install di Device Baru (Quick Start)
 1. Clone repository dan masuk ke folder proyek:
 	```bash
-	git clone <URL_REPO_ANDA>
+	git clone https://github.com/RhenoSeptianto/ARSIPARIS.git
 	cd ARSIPARIS
 	```
 2. Pastikan Docker Desktop (atau Docker Engine) sudah terinstall dan berjalan.
