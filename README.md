@@ -42,6 +42,11 @@ Contoh membuat `MASTER_KEY`:
 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 ```
 
+Contoh membuat `JWT_SECRET`:
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
 ### Install di Device Baru (Quick Start)
 1. Clone repository dan masuk ke folder proyek:
 	```bash
@@ -51,7 +56,10 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 2. Pastikan Docker Desktop (atau Docker Engine) sudah terinstall dan berjalan.
 3. Salin file environment dan isi nilai penting:
 	```bash
+	# Linux / macOS
 	cp .env.example .env
+	# Windows (PowerShell)
+	copy .env.example .env
 	```
 	- Set `JWT_SECRET` dengan string acak yang cukup panjang.
 	- Set `MASTER_KEY` dengan nilai base64 32 bytes (lihat contoh perintah di atas).
@@ -225,6 +233,17 @@ UI tersedia di `http://localhost:5173`.
 - **Auditor**
 	- Mengambil audit trail dan detail arsip dari endpoint `GET /archives/:id/audit` dan `GET /archives/:id`.
 	- Memverifikasi konsistensi hash dan status keputusan terhadap ledger Fabric.
+
+### ID Arsip vs ID Transaksi (Audit Trail)
+- **`archiveId`**
+	- ID utama arsip yang digunakan aplikasi (format UUID), misal: `fddd1171-e648-4c97-886b-df15076a01eb`.
+	- Dipakai di semua endpoint bisnis: `GET /archives/:id`, `POST /archives/:id/approve`, `GET /archives/:id/audit`, dan lain-lain.
+- **`txId` (ID transaksi)**
+	- ID setiap transaksi di Hyperledger Fabric yang menyentuh arsip tersebut (deretan karakter hex panjang).
+	- Ditampilkan di hasil `GetAuditTrail` sebagai daftar riwayat, misalnya beberapa transaksi untuk satu `archiveId` dengan status bertahap Draft → Pending → Approved.
+- **Hubungan keduanya**
+	- Satu `archiveId` dapat memiliki banyak `txId` (setiap perubahan status atau update lain menghasilkan satu transaksi baru).
+	- Audit trail menampilkan deretan `txId` dan nilai status pada masing-masing titik waktu, sehingga perubahan arsip dapat diaudit tanpa mengubah ID arsip utamanya.
 
 ### Kontrak Solidity (Opsional / Referensi)
 - Terdapat kontrak `ArchiveRegistry` di `contracts/ArchiveRegistry.sol` (berbasis Solidity + OpenZeppelin).
