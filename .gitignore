@@ -19,6 +19,7 @@ config/organizations/
 # Env files
 .env
 .env.*
+!.env.example
 
 # Logs
 npm-debug.log*
