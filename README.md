@@ -1,6 +1,6 @@
-# Sistem Arsiparis Terdesentralisasi (DApp)
+# Sistem Arsiparis Terdesentralisasi Berbasis Hyperledger Fabric
 
-DApp arsip berbasis Hyperledger Fabric untuk menjaga integritas, kerahasiaan, dan audit trail arsip institusi tanpa crypto wallet dan tanpa gas fee.
+Aplikasi arsip terdesentralisasi berbasis Hyperledger Fabric (permissioned blockchain, bukan blockchain publik) untuk menjaga integritas, kerahasiaan, dan audit trail arsip institusi tanpa crypto wallet dan tanpa gas fee.
 
 ## Prinsip
 - Integrity: data arsip dan riwayat keputusan disimpan immutable di Fabric ledger.

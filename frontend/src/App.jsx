@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:3001";
+const APP_VERSION = "v0.2.0-borrowing-2026-01-10";
 
 const roleLabels = {
   Admin: "Admin",
   Uploader: "Uploader (Unit Kerja)",
   Approver: "Approver (Arsiparis)",
   Auditor: "Auditor",
+  Borrower: "Peminjam Eksternal",
 };
 
 async function apiFetch(path, token, options = {}) {
@@ -27,11 +29,17 @@ export function App() {
 
   const [loginForm, setLoginForm] = useState({ username: "", password: "", captchaAnswer: "" });
   const [captcha, setCaptcha] = useState({ a: null, b: null, token: "" });
+  const [activeSection, setActiveSection] = useState("arsip");
   const [userForm, setUserForm] = useState({ username: "", password: "", role: "Uploader" });
   const [userList, setUserList] = useState([]);
   const [editUser, setEditUser] = useState(null);
 
-  const [uploadForm, setUploadForm] = useState({ classification: "", file: null });
+  const [uploadForm, setUploadForm] = useState({
+    classification: "",
+    file: null,
+    uploaderName: "",
+    uploaderType: "Perorangan",
+  });
   const [submitId, setSubmitId] = useState("");
   const [approveId, setApproveId] = useState("");
   const [rejectNote, setRejectNote] = useState("");
@@ -40,6 +48,7 @@ export function App() {
   const [keyData, setKeyData] = useState(null);
   const [selectedArchive, setSelectedArchive] = useState(null);
   const [fileUrl, setFileUrl] = useState("");
+  const [loanArchiveId, setLoanArchiveId] = useState("");
 
   const role = user?.role || "";
 
@@ -47,6 +56,40 @@ export function App() {
   const canUpload = role === "Uploader";
   const canApprove = role === "Approver";
   const canAudit = role === "Auditor" || role === "Approver" || role === "Admin";
+  const canBorrow = role === "Borrower";
+
+  const formatFabricTimestamp = (ts) => {
+    if (!ts) return "";
+    try {
+      const seconds = typeof ts.seconds === "number" ? ts.seconds : ts.seconds?.low || 0;
+      const nanos = typeof ts.nanos === "number" ? ts.nanos : 0;
+      const millis = seconds * 1000 + Math.floor(nanos / 1e6);
+      return new Date(millis).toLocaleString("id-ID", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return "";
+    }
+  };
+
+  const formatIsoTimestamp = (iso) => {
+    if (!iso) return "";
+    try {
+      return new Date(iso).toLocaleString("id-ID", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return iso;
+    }
+  };
 
   const loadCaptcha = async () => {
     try {
@@ -110,6 +153,7 @@ export function App() {
       setToken(data.token);
       setUser({ username: data.username, role: data.role });
       setMessage("Login berhasil");
+      setActiveSection("arsip");
     } catch (err) {
       setMessage(err.message);
       loadCaptcha();
@@ -179,6 +223,8 @@ export function App() {
       const form = new FormData();
       form.append("file", uploadForm.file);
       form.append("classification", uploadForm.classification);
+      form.append("uploaderName", uploadForm.uploaderName || "");
+      form.append("uploaderType", uploadForm.uploaderType || "");
       const res = await fetch(`${API_BASE}/archives`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
@@ -188,7 +234,7 @@ export function App() {
       if (!res.ok) throw new Error(data.error || "Upload gagal");
       setMessage(`Arsip tersimpan. ID: ${data.archiveId}`);
       setSubmitId(data.archiveId);
-      setUploadForm({ classification: "", file: null });
+      setUploadForm({ classification: "", file: null, uploaderName: "", uploaderType: "Perorangan" });
       refreshArchives();
     } catch (err) {
       setMessage(err.message);
@@ -295,7 +341,82 @@ export function App() {
     return <span className={className}>{status}</span>;
   };
 
+  const [borrowerContact, setBorrowerContact] = useState({ name: "", email: "", phone: "", type: "Perorangan" });
+
+  const onBorrow = async () => {
+    if (!loanArchiveId) return;
+    setMessage("");
+    try {
+      await apiFetch(`/archives/${encodeURIComponent(loanArchiveId)}/borrow`, token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: borrowerContact.name,
+          email: borrowerContact.email,
+          phone: borrowerContact.phone,
+          type: borrowerContact.type,
+        }),
+      });
+      setMessage("Peminjaman berhasil dibuat");
+      refreshArchives();
+    } catch (err) {
+      setMessage(err.message);
+    }
+  };
+
+  const onExtendLoan = async () => {
+    if (!loanArchiveId) return;
+    setMessage("");
+    try {
+      await apiFetch(`/archives/${encodeURIComponent(loanArchiveId)}/extend`, token, { method: "POST" });
+      setMessage("Peminjaman berhasil diperpanjang");
+      refreshArchives();
+    } catch (err) {
+      setMessage(err.message);
+    }
+  };
+
+  const onReturnLoan = async () => {
+    if (!loanArchiveId) return;
+    setMessage("");
+    try {
+      await apiFetch(`/archives/${encodeURIComponent(loanArchiveId)}/return`, token, { method: "POST" });
+      setMessage("Peminjaman dikembalikan");
+      refreshArchives();
+    } catch (err) {
+      setMessage(err.message);
+    }
+  };
+
+  const onCopyArchiveId = async (archiveId) => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(archiveId);
+        setMessage("Archive ID disalin ke clipboard");
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = archiveId;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+        setMessage("Archive ID disalin ke clipboard");
+      }
+    } catch {
+      setMessage("Gagal menyalin Archive ID");
+    }
+  };
+
+  const goToLoanWithArchive = (archiveId) => {
+    setActiveSection("loan");
+    setLoanArchiveId(archiveId);
+    setBorrowerContact({ name: "", email: "", phone: "", type: "Perorangan" });
+  };
+
   const archiveRows = useMemo(() => {
+    if (loading) return <div className="muted">Memuat data arsip...</div>;
     if (!archives.length) return <div className="muted">Belum ada arsip.</div>;
     return archives.map((a) => (
       <div key={a.archive_id} className="list-item">
@@ -303,15 +424,68 @@ export function App() {
           <div className="list-title">{a.archive_id}</div>
           <div className="muted">Owner: {a.owner}</div>
           <div className="muted">Klasifikasi: {a.classification}</div>
+          <div className="muted">
+            Pengunggah: {a.uploader_name || a.owner} {a.uploader_type && `(${a.uploader_type})`}
+          </div>
+          {(a.status === "Approved" || a.loan) && (
+            <div className="muted">
+              Status peminjaman:
+              {a.loan ? (
+                <>
+                  {" "}
+                  <span
+                    className={`badge inline ${a.loan.status === "BORROWED" ? "pending" : "approved"}`}
+                    style={{ marginRight: "0.35rem" }}
+                  >
+                    {a.loan.status === "BORROWED"
+                      ? "Dipinjam"
+                      : a.loan.status === "RETURNED"
+                      ? "Selesai"
+                      : a.loan.status}
+                  </span>
+                  {(a.loan.borrowerName || a.loan.borrower) &&
+                    ` oleh ${
+                      a.loan.borrowerName || a.loan.borrower
+                    }${a.loan.borrowerType ? ` (${a.loan.borrowerType})` : ""}`}
+                  {a.loan.dueDate && (
+                    <>
+                      <br />
+                      Jatuh tempo: {formatIsoTimestamp(a.loan.dueDate)}
+                    </>
+                  )}
+                </>
+              ) : (
+                <>
+                  {" "}
+                  <span className="badge inline approved" style={{ marginRight: "0.35rem" }}>
+                    Tersedia
+                  </span>
+                  Belum pernah / tidak sedang dipinjam
+                </>
+              )}
+            </div>
+          )}
         </div>
         <div className="list-right">
           {statusBadge(a.status)}
-          <button className="btn ghost" onClick={() => onViewArchive(a.archive_id)}>
+          <button className="btn ghost compact" type="button" onClick={() => onCopyArchiveId(a.archive_id)}>
+            Copy ID
+          </button>
+          <button className="btn ghost compact" onClick={() => onViewArchive(a.archive_id)}>
             Detail
           </button>
-          <button className="btn ghost" onClick={() => onFetchKey(a.archive_id)}>
+          <button className="btn ghost compact" onClick={() => onFetchKey(a.archive_id)}>
             Kunci
           </button>
+          {canBorrow && a.status === "Approved" && (
+            <button
+              className="btn compact loan-action"
+              type="button"
+              onClick={() => goToLoanWithArchive(a.archive_id)}
+            >
+              {a.loan && a.loan.status === "BORROWED" ? "Kembalikan" : "Pinjam"}
+            </button>
+          )}
         </div>
       </div>
     ));
@@ -322,9 +496,9 @@ export function App() {
       <header className="hero">
         <div>
           <div className="eyebrow">Sistem Arsiparis Terdesentralisasi</div>
-          <h1>DApp Arsip Berbasis Hyperledger Fabric</h1>
+          <h1>Sistem Arsip Berbasis Hyperledger Fabric (Permissioned)</h1>
           <p>
-            Integritas on-chain, E2E encryption, dan audit trail untuk pengelolaan arsip instansi.
+            Integritas on-chain, E2E encryption, dan audit trail untuk pengelolaan arsip instansi tanpa blockchain publik dan tanpa gas fee.
           </p>
         </div>
         <div className="hero-card">
@@ -333,6 +507,16 @@ export function App() {
             <>
               <div className="muted">User: {user.username}</div>
               <div className="muted">Role: {roleLabels[user.role]}</div>
+              <div className="muted" style={{ marginTop: "0.4rem", fontSize: "0.8rem" }}>
+                {user.role === "Admin" && "Admin dapat mengelola user dan melihat seluruh arsip."}
+                {user.role === "Uploader" &&
+                  "Uploader dapat mengenkripsi dan mengunggah arsip lalu submit untuk approval."}
+                {user.role === "Approver" &&
+                  "Approver meninjau arsip Pending lalu melakukan Approve atau Reject."}
+                {user.role === "Auditor" && "Auditor dapat membaca arsip dan Audit Trail tanpa mengubah data."}
+                {user.role === "Borrower" &&
+                  "Peminjam Eksternal hanya dapat meminjam, memperpanjang, dan mengembalikan arsip yang Approved."}
+              </div>
               <button
                 className="btn secondary"
                 onClick={() => {
@@ -349,11 +533,13 @@ export function App() {
                   setRejectNote("");
                   setUserList([]);
                   setEditUser(null);
-                  setUploadForm({ classification: "", file: null });
+                  setUploadForm({ classification: "", file: null, uploaderName: "", uploaderType: "Perorangan" });
                   setMessage("");
                   setLoginForm({ username: "", password: "", captchaAnswer: "" });
                   setCaptcha({ a: null, b: null, token: "" });
                   loadCaptcha();
+                  setActiveSection("arsip");
+                  setLoanArchiveId("");
                 }}
               >
                 Logout
@@ -401,9 +587,91 @@ export function App() {
       )}
 
       {user && (
-        <section className="grid">
-          {canManageUsers && (
-            <div className="panel">
+        <>
+          <div className="tabs">
+            <button
+              type="button"
+              className={`tab-button ${activeSection === "arsip" ? "active" : ""}`}
+              onClick={() => {
+                setActiveSection("arsip");
+                setSelectedArchive(null);
+                setKeyData(null);
+                setFileUrl("");
+                setLoanArchiveId("");
+                setBorrowerContact({ name: "", email: "", phone: "", type: "Perorangan" });
+              }}
+            >
+              Arsip
+            </button>
+            {canManageUsers && (
+              <button
+                type="button"
+                className={`tab-button ${activeSection === "admin" ? "active" : ""}`}
+                onClick={() => {
+                  setActiveSection("admin");
+                  setUserForm({ username: "", password: "", role: "Uploader" });
+                  setEditUser(null);
+                }}
+              >
+                Manajemen Pengguna
+              </button>
+            )}
+            {canUpload && (
+              <button
+                type="button"
+                className={`tab-button ${activeSection === "upload" ? "active" : ""}`}
+                onClick={() => {
+                  setActiveSection("upload");
+                  setUploadForm({ classification: "", file: null, uploaderName: "", uploaderType: "Perorangan" });
+                  setSubmitId("");
+                }}
+              >
+                Upload Arsip
+              </button>
+            )}
+            {canApprove && (
+              <button
+                type="button"
+                className={`tab-button ${activeSection === "approval" ? "active" : ""}`}
+                onClick={() => {
+                  setActiveSection("approval");
+                  setApproveId("");
+                  setRejectNote("");
+                }}
+              >
+                Approval
+              </button>
+            )}
+            {canBorrow && (
+              <button
+                type="button"
+                className={`tab-button ${activeSection === "loan" ? "active" : ""}`}
+                onClick={() => {
+                  setActiveSection("loan");
+                  setLoanArchiveId("");
+                  setBorrowerContact({ name: "", email: "", phone: "", type: "Perorangan" });
+                }}
+              >
+                Peminjaman
+              </button>
+            )}
+            {canAudit && (
+              <button
+                type="button"
+                className={`tab-button ${activeSection === "audit" ? "active" : ""}`}
+                onClick={() => {
+                  setActiveSection("audit");
+                  setAuditId("");
+                  setAuditTrail([]);
+                }}
+              >
+                Audit Trail
+              </button>
+            )}
+          </div>
+
+          {activeSection === "admin" && canManageUsers && (
+            <section className="panel wide">
               <div className="panel-title">Manajemen Pengguna</div>
               <form onSubmit={onCreateUser} className="form">
                 <input
@@ -425,6 +693,7 @@ export function App() {
                   <option value="Uploader">Uploader</option>
                   <option value="Approver">Approver</option>
                   <option value="Auditor">Auditor</option>
+                  <option value="Borrower">Peminjam Eksternal</option>
                 </select>
                 <button className="btn" type="submit">
                   Buat User
@@ -451,6 +720,7 @@ export function App() {
                               <option value="Uploader">Uploader</option>
                               <option value="Approver">Approver</option>
                               <option value="Auditor">Auditor</option>
+                              <option value="Borrower">Peminjam Eksternal</option>
                             </select>
                             <input
                               type="password"
@@ -485,11 +755,11 @@ export function App() {
                   ))
                 )}
               </div>
-            </div>
+            </section>
           )}
 
-          {canUpload && (
-            <div className="panel">
+          {activeSection === "upload" && canUpload && (
+            <section className="panel wide">
               <div className="panel-title">Unggah Arsip</div>
               <form onSubmit={onUpload} className="form">
                 <input
@@ -497,6 +767,18 @@ export function App() {
                   onChange={(e) => setUploadForm({ ...uploadForm, classification: e.target.value })}
                   placeholder="Klasifikasi"
                 />
+                <input
+                  value={uploadForm.uploaderName}
+                  onChange={(e) => setUploadForm({ ...uploadForm, uploaderName: e.target.value })}
+                  placeholder="Nama Pengunggah (mis. nama pegawai/instansi)"
+                />
+                <select
+                  value={uploadForm.uploaderType}
+                  onChange={(e) => setUploadForm({ ...uploadForm, uploaderType: e.target.value })}
+                >
+                  <option value="Perorangan">Perorangan</option>
+                  <option value="PT/Instansi">PT / Instansi</option>
+                </select>
                 <input
                   type="file"
                   onChange={(e) => setUploadForm({ ...uploadForm, file: e.target.files?.[0] || null })}
@@ -515,19 +797,22 @@ export function App() {
                   Submit untuk Approval
                 </button>
               </div>
-            </div>
+            </section>
           )}
 
-          {canApprove && (
-            <div className="panel">
+          {activeSection === "approval" && canApprove && (
+            <section className="panel wide">
               <div className="panel-title">Review Arsip</div>
+              <div className="muted" style={{ marginBottom: "0.5rem" }}>
+                Masukkan Archive ID arsip berstatus Pending untuk melakukan Approve atau Reject.
+              </div>
               <div className="inline-actions">
                 <input
                   value={approveId}
                   onChange={(e) => setApproveId(e.target.value)}
                   placeholder="Archive ID"
                 />
-                <button className="btn" onClick={onApprove}>
+                <button className="btn" onClick={onApprove} disabled={!approveId}>
                   Approve
                 </button>
               </div>
@@ -537,22 +822,25 @@ export function App() {
                 onChange={(e) => setRejectNote(e.target.value)}
                 placeholder="Catatan penolakan"
               />
-              <button className="btn secondary" onClick={onReject}>
+              <button className="btn secondary" onClick={onReject} disabled={!approveId}>
                 Reject
               </button>
-            </div>
+            </section>
           )}
 
-          {canAudit && (
-            <div className="panel">
+          {activeSection === "audit" && canAudit && (
+            <section className="panel wide">
               <div className="panel-title">Audit Trail</div>
+              <div className="muted" style={{ marginBottom: "0.5rem" }}>
+                Masukkan Archive ID untuk melihat seluruh riwayat perubahan arsip pada blockchain.
+              </div>
               <div className="inline-actions">
                 <input
                   value={auditId}
                   onChange={(e) => setAuditId(e.target.value)}
                   placeholder="Archive ID"
                 />
-                <button className="btn" onClick={onFetchAudit}>
+                <button className="btn" onClick={onFetchAudit} disabled={!auditId}>
                   Ambil Audit
                 </button>
               </div>
@@ -564,27 +852,44 @@ export function App() {
                     <div key={item.txId} className="list-item small">
                       <div>
                         <div className="list-title">{item.txId}</div>
-                        <div className="muted">{item.timestamp?.seconds?.low || ""}</div>
+                        <div className="muted">{formatFabricTimestamp(item.timestamp)}</div>
                       </div>
-                      <div className="muted">Status: {item.value?.status || ""}</div>
+                      <div className="muted">
+                        Status Arsip: {item.value?.status || ""}
+                        {item.value?.loan && (
+                          <>
+                            {" "}| Peminjaman: {item.value.loan.status}
+                            {(item.value.loan.borrowerName || item.value.loan.borrower) &&
+                              ` oleh ${
+                                item.value.loan.borrowerName || item.value.loan.borrower
+                              }${item.value.loan.borrowerType ? ` (${item.value.loan.borrowerType})` : ""}`}
+                            {item.value.loan.loanStart &&
+                              ` | Mulai: ${formatIsoTimestamp(item.value.loan.loanStart)}`}
+                            {item.value.loan.dueDate &&
+                              ` | Jatuh tempo: ${formatIsoTimestamp(item.value.loan.dueDate)}`}
+                            {typeof item.value.loan.extensionCount === "number" &&
+                              ` | Perpanjangan: ${item.value.loan.extensionCount}x`}
+                            {item.value.loan.returnedAt &&
+                              ` | Dikembalikan: ${formatIsoTimestamp(item.value.loan.returnedAt)}`}
+                          </>
+                        )}
+                      </div>
                     </div>
                   ))
                 )}
               </div>
-            </div>
+            </section>
           )}
-        </section>
-      )}
 
-      {user && (
-        <section className="panel wide">
-          <div className="panel-title">Daftar Arsip</div>
-          <div className="list">{archiveRows}</div>
-        </section>
-      )}
+          {activeSection === "arsip" && (
+            <>
+              <section className="panel wide">
+                <div className="panel-title">Daftar Arsip</div>
+                <div className="list">{archiveRows}</div>
+              </section>
 
-      {selectedArchive && (
-        <section className="panel wide">
+              {selectedArchive && (
+                <section className="panel wide">
           <div className="panel-title">Detail Arsip</div>
           <div className="list">
             <div className="list-item small">
@@ -606,22 +911,61 @@ export function App() {
             </div>
             <div className="list-item small">
               <div>
+                <div className="list-title">Pengunggah</div>
+                <div className="muted">
+                  {selectedArchive.uploaderName || selectedArchive.owner}
+                  {selectedArchive.uploaderType && ` (${selectedArchive.uploaderType})`}
+                </div>
+              </div>
+            </div>
+            <div className="list-item small">
+              <div>
                 <div className="list-title">Waktu Dibuat</div>
-                <div className="muted">{selectedArchive.timestamp}</div>
+                <div className="muted">{formatIsoTimestamp(selectedArchive.timestamp)}</div>
               </div>
               {selectedArchive.submittedAt && (
                 <div>
                   <div className="list-title">Waktu Submit</div>
-                  <div className="muted">{selectedArchive.submittedAt}</div>
+                  <div className="muted">{formatIsoTimestamp(selectedArchive.submittedAt)}</div>
                 </div>
               )}
               {selectedArchive.approvedAt && (
                 <div>
                   <div className="list-title">Waktu Approve</div>
-                  <div className="muted">{selectedArchive.approvedAt}</div>
+                  <div className="muted">{formatIsoTimestamp(selectedArchive.approvedAt)}</div>
                 </div>
               )}
             </div>
+            {selectedArchive.status === "Approved" && !selectedArchive.loan && (
+              <div className="list-item small">
+                <div>
+                  <div className="list-title">Ketersediaan</div>
+                  <div className="muted">Arsip tersedia dan dapat dipinjam oleh Peminjam Eksternal.</div>
+                </div>
+              </div>
+            )}
+            {selectedArchive.loan && (
+              <div className="list-item small">
+                <div>
+                  <div className="list-title">Status Peminjaman</div>
+                  <div className="muted">
+                    Status: {selectedArchive.loan.status}
+                    {(selectedArchive.loan.borrowerName || selectedArchive.loan.borrower) &&
+                      ` | Peminjam: ${
+                        selectedArchive.loan.borrowerName || selectedArchive.loan.borrower
+                      }${selectedArchive.loan.borrowerType ? ` (${selectedArchive.loan.borrowerType})` : ""}`}
+                    {selectedArchive.loan.loanStart &&
+                      ` | Mulai: ${formatIsoTimestamp(selectedArchive.loan.loanStart)}`}
+                    {selectedArchive.loan.dueDate &&
+                      ` | Jatuh tempo: ${formatIsoTimestamp(selectedArchive.loan.dueDate)}`}
+                    {typeof selectedArchive.loan.extensionCount === "number" &&
+                      ` | Perpanjangan: ${selectedArchive.loan.extensionCount}x`}
+                    {selectedArchive.loan.returnedAt &&
+                      ` | Dikembalikan: ${formatIsoTimestamp(selectedArchive.loan.returnedAt)}`}
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="list-item small">
               <div>
                 <div className="list-title">IPFS CID</div>
@@ -679,32 +1023,124 @@ export function App() {
               </div>
             )}
           </div>
-        </section>
-      )}
+                </section>
+              )}
 
-      {keyData && (
-        <section className="panel wide">
-          <div className="panel-title">Kunci Dekripsi</div>
-          <div className="muted">Archive ID: {keyData.archiveId}</div>
-          <div className="key-grid">
-            <div>
-              <div className="key-label">Key (base64)</div>
-              <textarea readOnly value={keyData.key} />
-            </div>
-            <div>
-              <div className="key-label">IV (base64)</div>
-              <textarea readOnly value={keyData.iv} />
-            </div>
-            <div>
-              <div className="key-label">Tag (base64)</div>
-              <textarea readOnly value={keyData.tag} />
-            </div>
-          </div>
-        </section>
+              {keyData && (
+                <section className="panel wide">
+                  <div className="panel-title">Kunci Dekripsi</div>
+                  <div className="muted">Archive ID: {keyData.archiveId}</div>
+                  <div className="key-grid">
+                    <div>
+                      <div className="key-label">Key (base64)</div>
+                      <textarea readOnly value={keyData.key} />
+                    </div>
+                    <div>
+                      <div className="key-label">IV (base64)</div>
+                      <textarea readOnly value={keyData.iv} />
+                    </div>
+                    <div>
+                      <div className="key-label">Tag (base64)</div>
+                      <textarea readOnly value={keyData.tag} />
+                    </div>
+                  </div>
+                </section>
+              )}
+            </>
+          )}
+              {activeSection === "loan" && canBorrow && (
+                <section className="panel wide">
+                  <div className="panel-title">Peminjaman Arsip</div>
+
+                  <div className="muted" style={{ marginBottom: "0.5rem" }}>
+                    Langkah 1: pastikan arsip sudah berstatus Approved. Isi Archive ID dan data peminjam untuk membuat
+                    peminjaman baru.
+                  </div>
+
+                  <div className="panel-subtitle">Peminjaman Baru (isi data peminjam)</div>
+                  <div className="inline-actions">
+                    <input
+                      value={loanArchiveId}
+                      onChange={(e) => setLoanArchiveId(e.target.value)}
+                      placeholder="Archive ID untuk peminjaman"
+                    />
+                  </div>
+                  <div className="form" style={{ marginTop: "0.75rem" }}>
+                    <input
+                      value={borrowerContact.name}
+                      onChange={(e) => setBorrowerContact({ ...borrowerContact, name: e.target.value })}
+                      placeholder="Nama peminjam (untuk notifikasi)"
+                    />
+                    <input
+                      type="email"
+                      value={borrowerContact.email}
+                      onChange={(e) => setBorrowerContact({ ...borrowerContact, email: e.target.value })}
+                      placeholder="Email peminjam (opsional)"
+                    />
+                    <input
+                      value={borrowerContact.phone}
+                      onChange={(e) => setBorrowerContact({ ...borrowerContact, phone: e.target.value })}
+                      placeholder="No. HP / WhatsApp peminjam (opsional)"
+                    />
+                    <select
+                      value={borrowerContact.type}
+                      onChange={(e) => setBorrowerContact({ ...borrowerContact, type: e.target.value })}
+                    >
+                      <option value="Perorangan">Perorangan</option>
+                      <option value="PT/Instansi">PT / Instansi</option>
+                    </select>
+                  </div>
+                  <div className="inline-actions" style={{ marginTop: "0.75rem" }}>
+                    <button
+                      className="btn"
+                      type="button"
+                      onClick={onBorrow}
+                      disabled={!loanArchiveId || !borrowerContact.name}
+                    >
+                      Pinjam
+                    </button>
+                  </div>
+
+                  <div className="divider" style={{ margin: "1.25rem 0" }} />
+
+                  <div className="panel-subtitle">Perpanjang / Pengembalian</div>
+                  <div className="inline-actions">
+                    <input
+                      value={loanArchiveId}
+                      onChange={(e) => setLoanArchiveId(e.target.value)}
+                      placeholder="Archive ID arsip yang sedang dipinjam"
+                    />
+                  </div>
+                  <div className="inline-actions" style={{ marginTop: "0.75rem" }}>
+                    <button
+                      className="btn secondary"
+                      type="button"
+                      onClick={onExtendLoan}
+                      disabled={!loanArchiveId}
+                    >
+                      Perpanjang (maks. 2x)
+                    </button>
+                    <button
+                      className="btn ghost"
+                      type="button"
+                      onClick={onReturnLoan}
+                      disabled={!loanArchiveId}
+                    >
+                      Kembalikan
+                    </button>
+                  </div>
+                  <div className="muted" style={{ marginTop: "0.75rem" }}>
+                    Untuk perpanjangan dan pengembalian, cukup isi Archive ID. Waktu mulai pinjam, jatuh tempo, dan
+                    perpanjangan dicatat otomatis di blockchain dan muncul di Audit Trail arsip terkait.
+                  </div>
+                </section>
+              )}
+        </>
       )}
 
       <footer className="footer">
         <div>Blockchain: Hyperledger Fabric | Storage: IPFS | Auth: Username/Password</div>
+        <div>Versi Aplikasi: {APP_VERSION}</div>
       </footer>
     </div>
   );

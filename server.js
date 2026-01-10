@@ -73,7 +73,9 @@ db.exec(`
     ipfs_cid TEXT NOT NULL,
     hash_cipher TEXT NOT NULL,
     timestamp TEXT NOT NULL,
-    rejection_note TEXT
+    rejection_note TEXT,
+    uploader_name TEXT,
+    uploader_type TEXT
   );
 
   CREATE TABLE IF NOT EXISTS archive_keys (
@@ -88,7 +90,30 @@ db.exec(`
     tag_iv TEXT NOT NULL,
     tag_tag TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS loan_notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    archive_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    target TEXT NOT NULL,
+    message TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
 `);
+
+// Simple migration for existing databases that were created
+// before uploader_name/uploader_type columns existed.
+try {
+  const archiveCols = db.prepare("PRAGMA table_info(archives)").all();
+  if (!archiveCols.find((c) => c.name === "uploader_name")) {
+    db.exec("ALTER TABLE archives ADD COLUMN uploader_name TEXT");
+  }
+  if (!archiveCols.find((c) => c.name === "uploader_type")) {
+    db.exec("ALTER TABLE archives ADD COLUMN uploader_type TEXT");
+  }
+} catch (e) {
+  console.error("Gagal migrasi tabel archives:", e.message);
+}
 
 const ipfsClientPromise = createIpfsClient({ url: IPFS_API_URL });
 
@@ -244,6 +269,8 @@ async function getContract(username) {
   await gateway.connect(loadConnectionProfile(), {
     wallet,
     identity: username,
+    // Gunakan Fabric service discovery supaya daftar peer endorser
+    // untuk channel "mychannel" terisi otomatis.
     discovery: { enabled: true, asLocalhost: false },
   });
 
@@ -342,11 +369,35 @@ function insertUser({ username, passwordHash, role }) {
 
 function upsertArchive(record) {
   db.prepare(
-    `INSERT INTO archives (archive_id, owner, classification, status, ipfs_cid, hash_cipher, timestamp, rejection_note)
-     VALUES (@archive_id, @owner, @classification, @status, @ipfs_cid, @hash_cipher, @timestamp, @rejection_note)
+    `INSERT INTO archives (
+       archive_id,
+       owner,
+       classification,
+       status,
+       ipfs_cid,
+       hash_cipher,
+       timestamp,
+       rejection_note,
+       uploader_name,
+       uploader_type
+     )
+     VALUES (
+       @archive_id,
+       @owner,
+       @classification,
+       @status,
+       @ipfs_cid,
+       @hash_cipher,
+       @timestamp,
+       @rejection_note,
+       @uploader_name,
+       @uploader_type
+     )
      ON CONFLICT(archive_id) DO UPDATE SET
        status=excluded.status,
-       rejection_note=excluded.rejection_note`
+       rejection_note=excluded.rejection_note,
+       uploader_name=COALESCE(excluded.uploader_name, uploader_name),
+       uploader_type=COALESCE(excluded.uploader_type, uploader_type)`
   ).run(record);
 }
 
@@ -442,7 +493,7 @@ app.post("/auth/login", (req, res) => {
 app.post("/admin/users", authRequired, requireRole(["Admin"]), async (req, res) => {
   const { username, password, role } = req.body || {};
   if (!username || !password || !role) return res.status(400).json({ error: "Data user tidak lengkap" });
-  if (!["Admin", "Uploader", "Approver", "Auditor"].includes(role)) {
+  if (!["Admin", "Uploader", "Approver", "Auditor", "Borrower"].includes(role)) {
     return res.status(400).json({ error: "Role tidak valid" });
   }
   if (getUser(username)) return res.status(409).json({ error: "User sudah ada" });
@@ -466,7 +517,7 @@ app.put("/admin/users/:username", authRequired, requireRole(["Admin"]), async (r
   const username = req.params.username;
   const { role, password } = req.body || {};
   if (!getUser(username)) return res.status(404).json({ error: "User tidak ditemukan" });
-  if (role && !["Admin", "Uploader", "Approver", "Auditor"].includes(role)) {
+  if (role && !["Admin", "Uploader", "Approver", "Auditor", "Borrower"].includes(role)) {
     return res.status(400).json({ error: "Role tidak valid" });
   }
   try {
@@ -508,11 +559,36 @@ app.get("/archives", authRequired, async (req, res) => {
   } else {
     rows = db.prepare("SELECT * FROM archives ORDER BY timestamp DESC").all();
   }
-  return res.json(rows);
+  try {
+    const { contract, gateway } = await getContract(req.user.sub);
+    try {
+      const enriched = [];
+      for (const row of rows) {
+        try {
+          const result = await contract.evaluateTransaction("GetArchive", row.archive_id);
+          const ledgerRecord = JSON.parse(result.toString());
+          enriched.push({
+            ...row,
+            status: ledgerRecord.status || row.status,
+            loan: ledgerRecord.loan || null,
+          });
+        } catch {
+          enriched.push(row);
+        }
+      }
+      return res.json(enriched);
+    } finally {
+      gateway.disconnect();
+    }
+  } catch (err) {
+    console.error(err);
+    // Jika koneksi ke Fabric gagal, fallback ke data SQLite saja.
+    return res.json(rows);
+  }
 });
 
 app.post("/archives", authRequired, requireRole(["Uploader"]), upload.single("file"), async (req, res) => {
-  const { classification } = req.body || {};
+  const { classification, uploaderName, uploaderType } = req.body || {};
   if (!classification) return res.status(400).json({ error: "classification wajib" });
   if (!req.file) return res.status(400).json({ error: "file wajib" });
 
@@ -534,7 +610,9 @@ app.post("/archives", authRequired, requireRole(["Uploader"]), upload.single("fi
         req.user.sub,
         classification,
         "Draft",
-        timestamp
+        timestamp,
+        uploaderName || "",
+        uploaderType || ""
       );
     } finally {
       gateway.disconnect();
@@ -549,6 +627,8 @@ app.post("/archives", authRequired, requireRole(["Uploader"]), upload.single("fi
       hash_cipher: hashCipher,
       timestamp,
       rejection_note: null,
+      uploader_name: uploaderName || null,
+      uploader_type: uploaderType || null,
     });
     saveArchiveKey(archiveId, key, iv, tag);
 
@@ -649,6 +729,137 @@ app.get("/archives/:id/audit", authRequired, requireRole(["Admin", "Approver", "
       gateway.disconnect();
     }
     return res.json(history);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/archives/:id/borrow", authRequired, requireRole(["Borrower"]), async (req, res) => {
+  const archiveId = req.params.id;
+  const { name, email, phone, type } = req.body || {};
+  try {
+    const { contract, gateway } = await getContract(req.user.sub);
+    let updated;
+    try {
+      const result = await contract.submitTransaction(
+        "BorrowArchive",
+        archiveId,
+        name || "",
+        email || "",
+        phone || "",
+        type || ""
+      );
+      updated = result && result.length ? JSON.parse(result.toString()) : null;
+    } finally {
+      gateway.disconnect();
+    }
+    return res.json({ ok: true, loan: updated ? updated.loan : null });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+async function checkDueLoans(nowOverride) {
+  const now = nowOverride ? new Date(nowOverride) : new Date();
+  const rows = db.prepare("SELECT archive_id FROM archives").all();
+  if (!rows.length) return { checked: 0, notifications: 0 };
+
+  let notifications = 0;
+  for (const row of rows) {
+    try {
+      const { contract, gateway } = await getContract(FABRIC_CA_ADMIN);
+      try {
+        const result = await contract.evaluateTransaction("GetArchive", row.archive_id);
+        const record = JSON.parse(result.toString());
+        if (!record.loan || record.loan.status !== "BORROWED") continue;
+        const due = new Date(record.loan.dueDate);
+        if (isNaN(due.getTime())) continue;
+        if (due > now) continue;
+
+        const already = db
+          .prepare(
+            "SELECT 1 FROM loan_notifications WHERE archive_id = ? AND type = ? LIMIT 1"
+          )
+          .get(row.archive_id, "due");
+        if (already) continue;
+
+        const msg = `Peminjaman arsip ${record.archiveId} atas nama ${
+          record.loan.borrowerName || record.loan.borrower
+        } sudah jatuh tempo pada ${record.loan.dueDate}`;
+
+        const createdAt = new Date().toISOString();
+        if (record.loan.borrowerEmail) {
+          db.prepare(
+            "INSERT INTO loan_notifications (archive_id, type, target, message, created_at) VALUES (?, ?, ?, ?, ?)"
+          ).run(row.archive_id, "email", record.loan.borrowerEmail, msg, createdAt);
+          console.log("[NOTIF][EMAIL]", record.loan.borrowerEmail, msg);
+          notifications++;
+        }
+        if (record.loan.borrowerPhone) {
+          db.prepare(
+            "INSERT INTO loan_notifications (archive_id, type, target, message, created_at) VALUES (?, ?, ?, ?, ?)"
+          ).run(row.archive_id, "whatsapp", record.loan.borrowerPhone, msg, createdAt);
+          console.log("[NOTIF][WA]", record.loan.borrowerPhone, msg);
+          notifications++;
+        }
+      } finally {
+        gateway.disconnect();
+      }
+    } catch (err) {
+      console.error("Gagal cek jatuh tempo untuk", row.archive_id, err.message);
+    }
+  }
+  return { checked: rows.length, notifications };
+}
+
+app.post(
+  "/jobs/check-due-loans",
+  authRequired,
+  requireRole(["Admin"]),
+  async (req, res) => {
+    try {
+      const { now } = req.body || {};
+      const result = await checkDueLoans(now);
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+app.post("/archives/:id/extend", authRequired, requireRole(["Borrower"]), async (req, res) => {
+  const archiveId = req.params.id;
+  try {
+    const { contract, gateway } = await getContract(req.user.sub);
+    let updated;
+    try {
+      const result = await contract.submitTransaction("ExtendLoan", archiveId);
+      updated = result && result.length ? JSON.parse(result.toString()) : null;
+    } finally {
+      gateway.disconnect();
+    }
+    return res.json({ ok: true, loan: updated ? updated.loan : null });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/archives/:id/return", authRequired, requireRole(["Borrower"]), async (req, res) => {
+  const archiveId = req.params.id;
+  try {
+    const { contract, gateway } = await getContract(req.user.sub);
+    let updated;
+    try {
+      const result = await contract.submitTransaction("ReturnLoan", archiveId);
+      updated = result && result.length ? JSON.parse(result.toString()) : null;
+    } finally {
+      gateway.disconnect();
+    }
+    return res.json({ ok: true, loan: updated ? updated.loan : null });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: err.message });
