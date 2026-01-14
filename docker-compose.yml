@@ -116,6 +116,14 @@ services:
       - "8080:8080"
     volumes:
       - ./data/ipfs:/data/ipfs
+  ipfs2:
+    image: ipfs/go-ipfs:v0.22.0
+    container_name: ipfs2
+    ports:
+      - "5002:5001"
+      - "8081:8080"
+    volumes:
+      - ./data/ipfs2:/data/ipfs
 
   backend:
     build:
@@ -135,6 +143,7 @@ services:
       - .env
     environment:
       - IPFS_API_URL=http://ipfs:5001
+      - IPFS_API_URLS=http://ipfs:5001,http://ipfs2:5001
       - FABRIC_CONNECTION_PROFILE=./fabric/connection.json
       - FABRIC_CA_URL=http://ca.org1.example.com:7054
       - FABRIC_CA_NAME=ca-org1
@@ -145,6 +154,7 @@ services:
       - FABRIC_CA_ADMIN_PASS=adminpw
     depends_on:
       - ipfs
+      - ipfs2
       - peer0.org1.example.com
 
   frontend:

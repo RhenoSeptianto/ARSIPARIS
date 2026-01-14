@@ -17,7 +17,7 @@ Aplikasi arsip terdesentralisasi berbasis Hyperledger Fabric (permissioned block
 - Blockchain: Hyperledger Fabric (permissioned).
 - Chaincode: Node.js (`chaincode/`).
 - Backend API: Express (`server.js`).
-- Storage: IPFS untuk file terenkripsi, SQLite untuk metadata lokal.
+- Storage: IPFS (multi node opsional) untuk file terenkripsi, SQLite untuk metadata lokal.
 - Auth: username/password (JWT) + Fabric ABAC.
 - Container: Docker Compose.
 
@@ -36,6 +36,7 @@ Prerequisites:
 ### 1) Siapkan env
 Salin `.env.example` ke `.env` dan isi `JWT_SECRET` + `MASTER_KEY`.
 Docker Compose akan membaca `.env` untuk backend.
+Jika ingin redundansi IPFS, isi `IPFS_API_URLS` (comma-separated).
 
 Contoh membuat `MASTER_KEY`:
 ```bash
@@ -73,7 +74,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 	```
 5. Jalankan IPFS, backend, dan frontend:
 	```bash
-	docker compose up -d ipfs backend frontend
+	docker compose up -d ipfs ipfs2 backend frontend
 	```
 6. Akses aplikasi:
 	- UI: `http://localhost:5173`
@@ -107,7 +108,7 @@ docker compose run --rm cli sh scripts/fabric-deploy-cc.sh
 
 ### 3) Jalankan backend + IPFS + frontend
 ```bash
-docker compose up -d ipfs backend frontend
+docker compose up -d ipfs ipfs2 backend frontend
 ```
 
 UI tersedia di `http://localhost:5173`.
@@ -115,7 +116,7 @@ UI tersedia di `http://localhost:5173`.
 ## Alur Aplikasi
 1. User login (tanpa wallet).
 2. Uploader mengunggah dokumen dan metadata.
-3. Backend mengenkripsi file (AES-256-GCM) dan upload ke IPFS.
+3. Backend mengenkripsi file (AES-256-GCM) dan upload ke IPFS (multi node jika aktif).
 4. Hash cipher + CID + metadata disimpan di Fabric.
 5. Approver menyetujui/menolak.
 6. Auditor melihat audit trail.
@@ -175,7 +176,7 @@ UI tersedia di `http://localhost:5173`.
 	- Menggunakan `fabric-network` dan `fabric-ca-client` untuk koneksi ke peer/orderer dan CA Fabric.
 	- Menggunakan `better-sqlite3` untuk database lokal (users, archives, archive_keys) serta `ipfs-http-client` untuk koneksi ke node IPFS.
 - **Penyimpanan**
-	- **IPFS**: menyimpan ciphertext dokumen terenkripsi. Konfigurasi dan datastore lokal berada di folder `data/ipfs`.
+	- **IPFS**: menyimpan ciphertext dokumen terenkripsi. Konfigurasi dan datastore lokal berada di folder `data/ipfs` dan `data/ipfs2` (opsional).
 	- **SQLite**: menyimpan user, metadata arsip, dan key terenkripsi di file `data/arsiparis.db`.
 - **Frontend (React + Vite)**
 	- UI role-based di folder `frontend/` (file utama `frontend/src/App.jsx`).
@@ -187,7 +188,7 @@ UI tersedia di `http://localhost:5173`.
 	- 1 peer organisasi: `peer0.org1.example.com` (Org1MSP).
 	- 1 CA: `ca.org1.example.com` (untuk registrasi dan enrolment identitas).
 - **Layanan pendukung**
-	- 1 node IPFS: service `ipfs` (API `:5001`, gateway `:8080`).
+	- 2 node IPFS: service `ipfs` (API `:5001`, gateway `:8080`) dan `ipfs2` (API `:5002`, gateway `:8081`).
 	- 1 backend API: service `backend` (`arsiparis-backend`).
 	- 1 frontend: service `frontend` (Vite dev server `:5173`).
 	- 1 container CLI admin: service `cli` (untuk bootstrap dan operasi Fabric via script).
@@ -266,6 +267,5 @@ UI tersedia di `http://localhost:5173`.
 - Siapkan `.env` dari `.env.example` dan isi minimal `JWT_SECRET` serta `MASTER_KEY` (base64, 32 bytes).
 - Bootstrap jaringan Fabric menggunakan script di folder `scripts/` sesuai langkah pada bagian Setup di atas.
 - Jalankan IPFS, backend, dan frontend menggunakan Docker Compose:
-	- `docker compose up -d ipfs backend frontend`
+	- `docker compose up -d ipfs ipfs2 backend frontend`
 - Akses UI di `http://localhost:5173` dan backend API di `http://localhost:3001`.
-

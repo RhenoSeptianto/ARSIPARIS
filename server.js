@@ -9,7 +9,7 @@ const multer = require("multer");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const Database = require("better-sqlite3");
-const { createIpfsClient, checkIpfs } = require("./lib/ipfs");
+const { createIpfsClients, checkIpfs } = require("./lib/ipfs");
 const { Gateway, Wallets } = require("fabric-network");
 const FabricCAServices = require("fabric-ca-client");
 
@@ -18,6 +18,7 @@ const {
   JWT_SECRET,
   MASTER_KEY,
   IPFS_API_URL = "http://ipfs:5001",
+  IPFS_API_URLS,
   FABRIC_CONNECTION_PROFILE = "./fabric/connection.json",
   FABRIC_CA_URL = "http://ca.org1.example.com:7054",
   FABRIC_CA_NAME = "ca-org1",
@@ -42,6 +43,18 @@ if (!MASTER_KEY) {
 const masterKey = Buffer.from(MASTER_KEY, "base64");
 if (masterKey.length !== 32) {
   console.error("MASTER_KEY harus base64 32 bytes");
+  process.exit(1);
+}
+
+const ipfsUrls = (IPFS_API_URLS || "")
+  .split(",")
+  .map((u) => u.trim())
+  .filter(Boolean);
+if (!ipfsUrls.length && IPFS_API_URL) {
+  ipfsUrls.push(IPFS_API_URL);
+}
+if (!ipfsUrls.length) {
+  console.error("IPFS_API_URLS/IPFS_API_URL wajib di .env");
   process.exit(1);
 }
 
@@ -115,7 +128,7 @@ try {
   console.error("Gagal migrasi tabel archives:", e.message);
 }
 
-const ipfsClientPromise = createIpfsClient({ url: IPFS_API_URL });
+const ipfsClientsPromise = createIpfsClients({ urls: ipfsUrls });
 
 const ccpPath = path.resolve(FABRIC_CONNECTION_PROFILE);
 const ccpRaw = JSON.parse(fs.readFileSync(ccpPath, "utf8"));
@@ -244,6 +257,43 @@ async function registerAndEnrollUser({ username, role, password }) {
       throw err;
     }
   }
+  const identity = {
+    credentials: {
+      certificate: enrollment.certificate,
+      privateKey: enrollment.key.toBytes(),
+    },
+    mspId: FABRIC_MSP_ID,
+    type: "X.509",
+  };
+  await wallet.put(username, identity);
+}
+
+async function updateUserRoleInCA({ username, role }) {
+  await ensureAdminIdentity();
+  const wallet = await getWallet();
+  const adminIdentity = await wallet.get(FABRIC_CA_ADMIN);
+  if (!adminIdentity) throw new Error("Admin identity belum tersedia");
+
+  const ca = getCAService();
+  const provider = wallet.getProviderRegistry().getProvider(adminIdentity.type);
+  const adminUser = await provider.getUserContext(adminIdentity, FABRIC_CA_ADMIN);
+  const identityService = ca.newIdentityService();
+
+  const newSecret = crypto.randomBytes(12).toString("hex");
+  await identityService.update(
+    username,
+    {
+      secret: newSecret,
+      maxEnrollments: -1,
+      attrs: [
+        { name: "role", value: role, ecert: true },
+        { name: "username", value: username, ecert: true },
+      ],
+    },
+    adminUser
+  );
+
+  const enrollment = await ca.enroll({ enrollmentID: username, enrollmentSecret: newSecret });
   const identity = {
     credentials: {
       certificate: enrollment.certificate,
@@ -465,8 +515,26 @@ function ensureDefaultAdmin() {
 app.get("/health", (_req, res) => res.json({ ok: true }));
 app.get("/health/ipfs", async (_req, res) => {
   try {
-    const info = await checkIpfs(ipfsClientPromise);
-    return res.json({ ok: true, id: info.id, agentVersion: info.agentVersion });
+    const clients = await ipfsClientsPromise;
+    const checks = await Promise.allSettled(
+      clients.map((client) => checkIpfs(Promise.resolve(client)))
+    );
+    const nodes = checks.map((result, idx) => {
+      if (result.status === "fulfilled") {
+        return {
+          ok: true,
+          url: ipfsUrls[idx],
+          id: result.value.id,
+          agentVersion: result.value.agentVersion,
+        };
+      }
+      return {
+        ok: false,
+        url: ipfsUrls[idx],
+        error: result.reason ? result.reason.message : "unknown error",
+      };
+    });
+    return res.json({ ok: nodes.some((n) => n.ok), nodes });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
   }
@@ -522,6 +590,7 @@ app.put("/admin/users/:username", authRequired, requireRole(["Admin"]), async (r
   }
   try {
     if (role) {
+      await updateUserRoleInCA({ username, role });
       db.prepare("UPDATE users SET role = ? WHERE username = ?").run(role, username);
     }
     if (password) {
@@ -595,8 +664,21 @@ app.post("/archives", authRequired, requireRole(["Uploader"]), upload.single("fi
   try {
     const { encrypted, key, iv, tag } = encryptDocument(req.file.buffer);
     const hashCipher = crypto.createHash("sha256").update(encrypted).digest("hex");
-    const ipfsClient = await ipfsClientPromise;
-    const ipfsAdded = await ipfsClient.add(encrypted);
+    const ipfsClients = await ipfsClientsPromise;
+    const addResults = await Promise.allSettled(
+      ipfsClients.map((client) => client.add(encrypted))
+    );
+    const firstOk = addResults.find((r) => r.status === "fulfilled");
+    if (!firstOk) {
+      throw new Error("Gagal upload ke semua node IPFS");
+    }
+    const ipfsAdded = firstOk.value;
+    const failed = addResults
+      .map((r, idx) => (r.status === "rejected" ? ipfsUrls[idx] : null))
+      .filter(Boolean);
+    if (failed.length) {
+      console.warn("Upload IPFS gagal di node:", failed.join(", "));
+    }
     const archiveId = crypto.randomUUID();
     const timestamp = new Date().toISOString();
 
@@ -879,12 +961,29 @@ app.get("/archives/:id/file", authRequired, async (req, res) => {
   if (!keyData) return res.status(404).json({ error: "Kunci tidak tersedia" });
 
   try {
-    const ipfsClient = await ipfsClientPromise;
-    const chunks = [];
-    for await (const chunk of ipfsClient.cat(archive.ipfs_cid)) {
-      chunks.push(chunk);
+    const ipfsClients = await ipfsClientsPromise;
+    let encrypted;
+    let lastError;
+    for (const client of ipfsClients) {
+      try {
+        const chunks = [];
+        for await (const chunk of client.cat(archive.ipfs_cid)) {
+          chunks.push(chunk);
+        }
+        encrypted = Buffer.concat(chunks.map((c) => Buffer.from(c)));
+        break;
+      } catch (err) {
+        lastError = err;
+      }
     }
-    const encrypted = Buffer.concat(chunks.map((c) => Buffer.from(c)));
+    if (!encrypted) {
+      throw lastError || new Error("Gagal mengambil data dari IPFS");
+    }
+
+    const computedHash = crypto.createHash("sha256").update(encrypted).digest("hex");
+    if (archive.hash_cipher && computedHash !== archive.hash_cipher) {
+      return res.status(409).json({ error: "Hash ciphertext tidak cocok" });
+    }
 
     const key = Buffer.from(keyData.key, "base64");
     const iv = Buffer.from(keyData.iv, "base64");

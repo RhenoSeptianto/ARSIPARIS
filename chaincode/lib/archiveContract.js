@@ -51,14 +51,15 @@ class ArchiveContract extends Contract {
     const exists = await this._getArchive(ctx, archiveId);
     if (exists) throw new Error("Archive sudah ada");
 
+    const txTime = this._getTxTimeISO(ctx);
     const record = {
       archiveId,
       hashCipher,
       ipfsCID,
       owner,
       classification,
-      status,
-      timestamp,
+      status: "Draft",
+      timestamp: txTime,
       uploaderName: uploaderName || "",
       uploaderType: uploaderType || "",
       rejectionNote: "",
@@ -83,7 +84,7 @@ class ArchiveContract extends Contract {
     }
 
     record.status = "Pending";
-    record.submittedAt = new Date().toISOString();
+    record.submittedAt = this._getTxTimeISO(ctx);
 
     await ctx.stub.putState(archiveId, Buffer.from(JSON.stringify(record)));
     ctx.stub.setEvent("ArchiveSubmitted", Buffer.from(JSON.stringify({ archiveId, status: record.status })));
@@ -97,7 +98,7 @@ class ArchiveContract extends Contract {
     if (record.status !== "Pending") throw new Error("Hanya Pending yang bisa di-approve");
 
     record.status = "Approved";
-    record.approvedAt = new Date().toISOString();
+    record.approvedAt = this._getTxTimeISO(ctx);
     record.approvals.push({
       approver: new ClientIdentity(ctx.stub).getID(),
       timestamp: record.approvedAt,
@@ -116,7 +117,7 @@ class ArchiveContract extends Contract {
 
     record.status = "Rejected";
     record.rejectionNote = note || "";
-    record.rejectedAt = new Date().toISOString();
+    record.rejectedAt = this._getTxTimeISO(ctx);
 
     await ctx.stub.putState(archiveId, Buffer.from(JSON.stringify(record)));
     ctx.stub.setEvent("ArchiveRejected", Buffer.from(JSON.stringify({ archiveId, status: record.status })));

@@ -12,10 +12,10 @@ export CORE_PEER_BCCSP_SW_HASH=SHA2
 export CORE_PEER_BCCSP_SW_SECURITY=256
 ORDERER_CA=/etc/hyperledger/fabric/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/tls/ca.crt
 
-CC_LABEL=archive_5
-CC_VERSION=5.0
+CC_LABEL=archive_6
+CC_VERSION=6.0
 # Upgrade definisi chaincode ke sequence berikutnya.
-CC_SEQUENCE=4
+CC_SEQUENCE=5
 
 peer lifecycle chaincode package /tmp/archive.tar.gz \
   --path /etc/hyperledger/fabric/chaincode --lang node --label "$CC_LABEL"
