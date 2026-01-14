@@ -269,3 +269,20 @@ UI tersedia di `http://localhost:5173`.
 - Jalankan IPFS, backend, dan frontend menggunakan Docker Compose:
 	- `docker compose up -d ipfs ipfs2 backend frontend`
 - Akses UI di `http://localhost:5173` dan backend API di `http://localhost:3001`.
+
+### Quick Demo (5-10 menit)
+1. Pastikan semua service sudah up:
+	```bash
+	docker compose up -d ipfs ipfs2 backend frontend
+	```
+2. Login sebagai Admin (default dari `.env`), lalu buat 4 user:
+	- Uploader, Approver, Auditor, Borrower.
+3. Login sebagai Uploader:
+	- Upload 1 file arsip, catat `Archive ID`.
+	- Klik Submit untuk approval.
+4. Login sebagai Approver:
+	- Approve arsip menggunakan `Archive ID`.
+5. Login sebagai Auditor:
+	- Buka Audit Trail dan masukkan `Archive ID` untuk lihat riwayat transaksi.
+6. (Opsional) Login sebagai Borrower:
+	- Pinjam arsip yang sudah Approved, lalu lihat status pinjaman di daftar arsip.
